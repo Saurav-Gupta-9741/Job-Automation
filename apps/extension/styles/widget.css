@@ -1,0 +1,62 @@
+#cos-widget {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 300px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font: 13px/1.5 -apple-system, Segoe UI, Roboto, sans-serif;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  z-index: 2147483647;
+  overflow: hidden;
+}
+#cos-widget .cos-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #111c33;
+  border-bottom: 1px solid #1e293b;
+}
+#cos-widget .cos-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #64748b;
+}
+#cos-widget .cos-dot.live {
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+  animation: cos-pulse 1.4s infinite;
+}
+@keyframes cos-pulse { 50% { opacity: 0.5; } }
+#cos-widget .cos-title { font-weight: 600; flex: 1; }
+#cos-widget .cos-min {
+  background: transparent; color: #94a3b8; border: none;
+  font-size: 16px; cursor: pointer; line-height: 1;
+}
+#cos-widget .cos-body { padding: 12px; }
+#cos-widget .cos-status {
+  background: #0b1424; border: 1px solid #1e293b; border-radius: 8px;
+  padding: 8px 10px; margin-bottom: 10px; min-height: 18px;
+  word-break: break-word;
+}
+#cos-widget .cos-handoff {
+  background: #1c1408; border: 1px solid #7c5b12; border-radius: 8px;
+  padding: 10px; margin-bottom: 10px;
+}
+#cos-widget .cos-hprompt { margin-bottom: 8px; color: #fde68a; }
+#cos-widget .cos-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+#cos-widget .cos-btn {
+  flex: 1; min-width: 90px; cursor: pointer;
+  background: #1e293b; color: #e2e8f0; border: 1px solid #334155;
+  border-radius: 8px; padding: 8px 10px; font-weight: 500;
+}
+#cos-widget .cos-btn:hover { background: #273449; }
+#cos-widget .cos-primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+#cos-widget .cos-primary:hover { background: #1d4ed8; }
+#cos-widget .cos-input {
+  width: 100%; box-sizing: border-box; margin-bottom: 8px;
+  background: #0b1424; color: #e2e8f0; border: 1px solid #334155;
+  border-radius: 8px; padding: 8px 10px;
+}

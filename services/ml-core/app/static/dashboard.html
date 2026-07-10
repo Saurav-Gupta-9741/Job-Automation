@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Career OS — Dashboard</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0b1120; color: #e2e8f0;
+           font: 14px/1.5 -apple-system, Segoe UI, Roboto, sans-serif; }
+    header { padding: 20px 28px; border-bottom: 1px solid #1e293b;
+             display: flex; align-items: center; gap: 14px; }
+    header h1 { font-size: 18px; margin: 0; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #64748b; }
+    .dot.ok { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+    main { padding: 24px 28px; max-width: 1100px; margin: 0 auto; }
+    .cards { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 24px; }
+    .card { background: #111c33; border: 1px solid #1e293b; border-radius: 12px;
+            padding: 16px 18px; min-width: 150px; }
+    .card .n { font-size: 26px; font-weight: 700; }
+    .card .l { color: #94a3b8; font-size: 12px; text-transform: uppercase;
+               letter-spacing: .04em; }
+    table { width: 100%; border-collapse: collapse; background: #0f172a;
+            border: 1px solid #1e293b; border-radius: 12px; overflow: hidden; }
+    th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid #1e293b;
+             font-size: 13px; }
+    th { background: #111c33; color: #94a3b8; font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    a { color: #60a5fa; text-decoration: none; }
+    .badge { padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .b-submitted { background: #052e1a; color: #4ade80; }
+    .b-in_progress { background: #1e293b; color: #cbd5e1; }
+    .b-uncertain { background: #3a2a06; color: #fbbf24; }
+    .b-aborted { background: #3a0d0d; color: #f87171; }
+    .muted { color: #64748b; }
+    .refresh { margin-left: auto; background: #1e293b; color: #e2e8f0;
+               border: 1px solid #334155; border-radius: 8px; padding: 7px 12px;
+               cursor: pointer; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="dot" id="health-dot"></span>
+    <h1>Career OS — Dashboard</h1>
+    <span class="muted" id="health-text">connecting…</span>
+    <button class="refresh" onclick="load()">Refresh</button>
+  </header>
+  <main>
+    <div class="cards" id="cards"></div>
+    <table>
+      <thead>
+        <tr><th>Job</th><th>Platform</th><th>Status</th><th>Updated</th></tr>
+      </thead>
+      <tbody id="rows"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </main>
+
+  <script>
+    const API = location.origin;
+
+    function platformOf(url) {
+      url = (url || "").toLowerCase();
+      if (url.includes("linkedin")) return "LinkedIn";
+      if (url.includes("workday")) return "Workday";
+      if (url.includes("greenhouse") || url.includes("grnh.se")) return "Greenhouse";
+      if (url.includes("lever.co")) return "Lever";
+      if (url.includes("cutshort")) return "Cutshort";
+      try { return new URL(url).hostname.replace("www.", ""); } catch { return "—"; }
+    }
+
+    async function load() {
+      try {
+        const h = await (await fetch(`${API}/health`)).json();
+        document.getElementById("health-dot").classList.toggle("ok", h.ok);
+        document.getElementById("health-text").textContent =
+          `backend up · ${h.tokens_spent_60s}/${h.tpm_budget} TPM used` +
+          (h.circuit_open ? " · ⚠ LLM circuit open" : "");
+      } catch {
+        document.getElementById("health-text").textContent = "backend offline";
+      }
+
+      let apps = [];
+      try { apps = await (await fetch(`${API}/api/applications`)).json(); } catch {}
+
+      const submitted = apps.filter(a => a.submitted).length;
+      const inprog = apps.filter(a => a.status === "in_progress").length;
+      document.getElementById("cards").innerHTML = `
+        <div class="card"><div class="n">${apps.length}</div><div class="l">Total</div></div>
+        <div class="card"><div class="n">${submitted}</div><div class="l">Submitted</div></div>
+        <div class="card"><div class="n">${inprog}</div><div class="l">In progress</div></div>`;
+
+      const rows = apps.map(a => `
+        <tr>
+          <td><a href="${a.url}" target="_blank">${a.title || a.url || "(untitled)"}</a></td>
+          <td>${platformOf(a.url)}</td>
+          <td><span class="badge b-${a.status}">${a.status}</span></td>
+          <td class="muted">${a.updated_at || ""}</td>
+        </tr>`).join("");
+      document.getElementById("rows").innerHTML =
+        rows || `<tr><td colspan="4" class="muted">No applications yet.</td></tr>`;
+    }
+
+    load();
+    setInterval(load, 5000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+# Python
+services/ml-core/.venv/
+__pycache__/
+*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+ENV/
+env/
+
+# Secrets & personal data (never commit)
+.env
+.env.local
+.env.*.local
+*.env
+services/ml-core/app/data/*.db
+services/ml-core/app/data/profile.json
+services/ml-core/app/data/resume.pdf
+
+# Logs
+*.log
+logs/
+services/ml-core/*.log
+
+# Backups & Exports
+backups/
+exports/
+temp_*.json
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.tmp

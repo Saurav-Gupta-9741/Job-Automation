@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Career OS",
+  "version": "0.1.0",
+  "description": "Autonomous job-application agent. Perceive -> Think (backend) -> Act.",
+  "permissions": ["activeTab", "storage", "scripting", "tabs", "notifications"],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Career OS"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "content/config.js",
+        "content/state.js",
+        "content/scanner.js",
+        "content/upload.js",
+        "content/executor.js",
+        "content/widget.js",
+        "content/agent.js"
+      ],
+      "css": ["styles/widget.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["styles/widget.css"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
