@@ -67,7 +67,8 @@ SUBMIT_WORDS = ["submit application", "submit", "apply now", "send application"]
 
 
 def fill_known_fields(elements: list[Element], profile: Profile) -> list[Action]:
-    """Fill every empty field we can answer deterministically from the profile."""
+    """Fill every empty field we can answer deterministically from the profile.
+    Fills both required AND optional fields if the profile has the data."""
     fields = []
     for e in elements:
         if not is_fillable(e) or not empty(e):
@@ -84,12 +85,19 @@ def fill_known_fields(elements: list[Element], profile: Profile) -> list[Action]
     return [Action(type=ActionType.FILL_ALL, fields=fields)]
 
 
-def unresolved_fields(elements: list[Element], profile: Profile) -> list[Element]:
-    """Fillable, empty fields we could NOT answer from the profile (LLM candidates)."""
+def unresolved_fields(elements: list[Element], profile: Profile,
+                      required_only: bool = False) -> list[Element]:
+    """Fillable, empty fields we could NOT answer from the profile.
+
+    If required_only=True, returns ONLY required (star-marked) fields.
+    This prevents optional empty fields from blocking form submission.
+    """
     out = []
     for e in elements:
         if not is_fillable(e) or not empty(e):
             continue
+        if required_only and not e.required:
+            continue  # Skip optional fields — don't block progress
         if profile.answer_for(e.text or e.placeholder or e.name or "") is None:
             out.append(e)
     return out

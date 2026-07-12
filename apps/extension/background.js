@@ -79,6 +79,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
         });
         return; // async callback handles response
+      } else if (msg.kind === "USAGE") {
+        const r = await fetch(BACKEND + "/api/usage");
+        sendResponse({ ok: true, data: await r.json() });
+      } else if (msg.kind === "ACTIVATE_LICENSE") {
+        const r = await fetch(BACKEND + "/api/license", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: msg.key }),
+        });
+        const data = await r.json();
+        sendResponse({ ok: r.ok, data });
+      } else if (msg.kind === "SAVE_CONFIG") {
+        const r = await fetch(BACKEND + "/api/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(msg.config),
+        });
+        sendResponse({ ok: r.ok, data: await r.json() });
+      } else if (msg.kind === "GET_CONFIG") {
+        const r = await fetch(BACKEND + "/api/config");
+        sendResponse({ ok: true, data: await r.json() });
       } else {
         sendResponse({ ok: false, error: "unknown message" });
       }

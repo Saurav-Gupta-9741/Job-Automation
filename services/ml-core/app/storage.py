@@ -75,6 +75,16 @@ def init_db() -> None:
                 created_at TEXT DEFAULT (datetime('now')),
                 PRIMARY KEY (session_id, from_hash, to_hash)
             );
+
+            -- Freemium: usage tracking per billing month
+            CREATE TABLE IF NOT EXISTS usage (
+                month       TEXT PRIMARY KEY,
+                count       INTEGER DEFAULT 0,
+                limit_val   INTEGER DEFAULT 3,
+                tier        TEXT DEFAULT 'free',
+                license_key TEXT DEFAULT '',
+                activated_at TEXT DEFAULT (datetime('now'))
+            );
             """
         )
         _conn.commit()
@@ -255,6 +265,63 @@ def reset_stage(session_id: str, stage_hash: str) -> None:
             (session_id, stage_hash),
         )
         _conn.commit()
+
+
+# --- freemium usage tracking ---------------------------------------------------
+
+def get_usage() -> dict[str, Any]:
+    """Get current month's usage and quota info."""
+    from datetime import datetime
+    month = datetime.now().strftime('%Y-%m')
+    with _lock:
+        row = _conn.execute(
+            "SELECT * FROM usage WHERE month = ?", (month,)
+        ).fetchone()
+        if not row:
+            _conn.execute(
+                "INSERT INTO usage (month, count, limit_val, tier) "
+                "VALUES (?, 0, 3, 'free')",
+                (month,),
+            )
+            _conn.commit()
+            row = _conn.execute(
+                "SELECT * FROM usage WHERE month = ?", (month,)
+            ).fetchone()
+        return dict(row)
+
+
+def increment_usage() -> dict[str, Any]:
+    """Increment this month's usage count. Returns updated usage."""
+    from datetime import datetime
+    month = datetime.now().strftime('%Y-%m')
+    get_usage()  # ensure row exists
+    with _lock:
+        _conn.execute(
+            "UPDATE usage SET count = count + 1 WHERE month = ?", (month,)
+        )
+        _conn.commit()
+    return get_usage()
+
+
+def has_quota() -> bool:
+    """Check if the user has remaining applications this month."""
+    u = get_usage()
+    return u['count'] < u['limit_val']
+
+
+def activate_license(key: str, tier: str = 'pro', limit: int = 50) -> dict[str, Any]:
+    """Activate a license key and upgrade the current month's tier."""
+    from datetime import datetime
+    month = datetime.now().strftime('%Y-%m')
+    get_usage()  # ensure row exists
+    with _lock:
+        _conn.execute(
+            "UPDATE usage SET tier = ?, limit_val = ?, license_key = ?, "
+            "activated_at = datetime('now') WHERE month = ?",
+            (tier, limit, key, month),
+        )
+        _conn.commit()
+    return get_usage()
 
 
 init_db()

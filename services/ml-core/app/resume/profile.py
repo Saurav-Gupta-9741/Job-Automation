@@ -37,6 +37,7 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "ethnicity": "",
     "veteran_status": "",
     "disability_status": "",
+    "residential_address": "",
     "summary": "",
     "skills": [],
     "raw_text": "",                 # full resume text, for LLM context slices
@@ -64,6 +65,8 @@ _FIELD_SYNONYMS: list[tuple[list[str], str]] = [
     (["require sponsorship", "need sponsorship", "visa sponsorship"],
      "requires_sponsorship"),
     (["relocate", "relocation", "willing to move"], "willing_to_relocate"),
+    (["residential address", "street address", "address", "mailing address",
+      "home address"], "residential_address"),
     (["city"], "city"),
     (["country"], "country"),
     (["location", "current location", "where are you"], "location"),
@@ -100,20 +103,25 @@ class Profile:
                     return str(val)
         return None
 
-    def context_slice(self, max_chars: int = 1500) -> str:
-        """A compact profile summary for LLM prompts (token-frugal)."""
+    def context_slice(self, max_chars: int = 2500) -> str:
+        """A compact profile summary for LLM prompts."""
         d = self.data
         lines = [
             f"Name: {d.get('full_name')}",
             f"Email: {d.get('email')}  Phone: {d.get('phone')}",
-            f"Location: {d.get('location')}",
-            f"Current: {d.get('current_title')} at {d.get('current_company')}",
+            f"Location: {d.get('location')}  City: {d.get('city')}",
+            f"Current role: {d.get('current_title')} at {d.get('current_company')}",
             f"Experience: {d.get('years_experience')} years",
-            f"Skills: {', '.join(d.get('skills', [])[:20])}",
+            f"Education: {d.get('education', '')} | Degree: {d.get('degree', '')}",
+            f"Skills: {', '.join(d.get('skills', [])[:25])}",
+            f"Desired salary: {d.get('desired_salary', 'Negotiable')}",
+            f"Notice period: {d.get('notice_period', 'Immediately available')}",
             f"Work auth: {d.get('work_authorization')}  "
-            f"Sponsorship: {d.get('requires_sponsorship')}  "
+            f"Sponsorship needed: {d.get('requires_sponsorship')}  "
             f"Relocate: {d.get('willing_to_relocate')}",
-            f"Summary: {d.get('summary', '')[:400]}",
+            f"Gender: {d.get('gender', '')}  Veteran: {d.get('veteran_status', '')}",
+            f"Summary: {d.get('summary', '')[:500]}",
+            f"Resume: {d.get('raw_text', '')[:600]}",
         ]
         return "\n".join(lines)[:max_chars]
 

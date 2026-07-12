@@ -54,6 +54,21 @@ def plan_step(req: StepRequest) -> StepResponse:
     profile = load_profile()
     storage.upsert_application(req.session_id, url=req.url, title=req.title)
 
+    # --- Layer -1: Quota check (freemium) --------------------------------------
+    if not storage.has_quota():
+        usage = storage.get_usage()
+        return StepResponse(
+            session_id=req.session_id,
+            script=[Action(
+                type=ActionType.ASK_USER,
+                prompt=f"Free tier limit reached ({usage['count']}/{usage['limit_val']} applications this month). Upgrade to Pro for \u20b911/month to continue.",
+                input_kind="manual",
+            )],
+            source="safety",
+            stage="quota_exceeded",
+            reason=f"quota exhausted: {usage['count']}/{usage['limit_val']}",
+        )
+
     # --- Layer 0: safety -------------------------------------------------------
     # Idempotency: never act again on an already-submitted application.
     if storage.is_already_submitted(req.session_id):
@@ -111,11 +126,20 @@ def plan_step(req: StepRequest) -> StepResponse:
         return _resp(req, actions, "rule", f"{adapter.name} rule", stage=adapter.name)
 
     # --- Layers 2+3: resolve leftover fields via memory, then LLM --------------
-    unresolved = _unresolved(req, profile)
+    # First pass: resolve REQUIRED fields only (these block form submission)
+    unresolved = _unresolved(req, profile, required_only=True)
     if unresolved:
         actions, source = _resolve_fields(req, profile, unresolved)
         if actions:
-            return _resp(req, actions, source, "resolved fields", stage=adapter.name)
+            return _resp(req, actions, source, "resolved required fields", stage=adapter.name)
+
+    # Second pass: try to fill optional fields too (best effort, won't block)
+    optional_unresolved = _unresolved(req, profile, required_only=False)
+    if optional_unresolved:
+        actions, source = _resolve_fields(req, profile, optional_unresolved,
+                                          allow_skip=True)
+        if actions:
+            return _resp(req, actions, source, "resolved optional fields", stage=adapter.name)
 
     # --- Layer 4: nothing actionable -> ask the human --------------------------
     return _resp(req, [Action(
@@ -159,14 +183,20 @@ def _validate_answer(element: Element, value: str) -> tuple[bool, str]:
     return True, ""
 
 
-def _unresolved(req: StepRequest, profile: Profile) -> list[Element]:
+def _unresolved(req: StepRequest, profile: Profile,
+                required_only: bool = False) -> list[Element]:
     from ..adapters.base import unresolved_fields
-    return unresolved_fields(req.elements, profile)
+    return unresolved_fields(req.elements, profile, required_only=required_only)
 
 
 def _resolve_fields(req: StepRequest, profile: Profile,
-                    unresolved: list[Element]) -> tuple[list[Action], str]:
-    """Try Answer Bank first (0 tokens), then LLM for the remainder with confidence tiers."""
+                    unresolved: list[Element],
+                    allow_skip: bool = False) -> tuple[list[Action], str]:
+    """Try Answer Bank first (0 tokens), then LLM for the remainder.
+
+    If allow_skip=True (optional fields), we never ask the user — just skip
+    what we can't fill and let the form proceed.
+    """
     fields: list[dict] = []
     still_unknown: list[Element] = []
     source = "memory"
@@ -182,58 +212,61 @@ def _resolve_fields(req: StepRequest, profile: Profile,
             still_unknown.append(e)
 
     if still_unknown:
-        answers = llm.resolve_fields(profile.context_slice(), still_unknown)
+        answers = llm.resolve_fields(profile.context_slice(), still_unknown, screenshot=req.screenshot)
         by_id = {e.id: e for e in still_unknown}
         needs_user: list[Element] = []
-        low_confidence: list[Element] = []
         resolved_count = 0
-        
+
         for eid, res in answers.items():
             e = by_id.get(eid)
             if not e:
                 continue
-            
+
             confidence = res.get("confidence", 0.5)
             value = res.get("value")
             needs_user_flag = res.get("needs_user", False)
-            
-            # Confidence tiers:
-            # 0.85+: High confidence - auto-fill
-            # 0.60-0.84: Medium confidence - fill but could flag for review
-            # 0.40-0.59: Low confidence - pre-populate with warning or ask
-            # <0.40: Very low - ask user
-            
-            if needs_user_flag or value in (None, "") or confidence < 0.40:
-                needs_user.append(e)
+
+            # DROPDOWN OVERRIDE: if the field has options, ALWAYS use the LLM's
+            # pick regardless of needs_user flag — user should never be asked
+            # to manually select from a dropdown.
+            is_dropdown = e.tag == "select" or (e.options and len(e.options) > 0)
+            if is_dropdown and value:
+                # Force-fill dropdowns — pick from options
+                source = "llm"
+                resolved_count += 1
+                fields.append({"target_id": e.id, "value": value, "select": True})
+                storage.remember_answer(e.text or e.placeholder or e.name or "",
+                                        str(value), "llm", max(confidence, 0.7))
                 continue
-            
-            if confidence < 0.60:
-                # Low confidence: still fill but track it
-                low_confidence.append(e)
-            
+
+            # For non-dropdowns: respect confidence thresholds
+            if needs_user_flag or value in (None, "") or confidence < 0.40:
+                if not allow_skip:  # Only ask user for required fields
+                    needs_user.append(e)
+                continue
+
             source = "llm"
             resolved_count += 1
-            
+
             # Validate the answer before using it
             is_valid, error_msg = _validate_answer(e, value)
             if not is_valid:
-                # Log validation failure and ask user for correct value
                 telemetry.track_error(req.session_id, "validation_failed", error_msg)
-                needs_user.append(e)
+                if not allow_skip:
+                    needs_user.append(e)
                 continue
-            
+
             fields.append({"target_id": e.id, "value": value,
                            "select": e.tag == "select"})
             storage.remember_answer(e.text or e.placeholder or e.name or "",
                                     str(value), "llm", confidence)
-        
-        # Track LLM usage
+
         if resolved_count > 0:
-            telemetry.track_llm_call(req.session_id, resolved_count, 0)  # tokens tracked elsewhere
-        
-        # Any element the LLM couldn't/shouldn't answer -> ask the user for it.
+            telemetry.track_llm_call(req.session_id, resolved_count, 0)
+
+        # Ask user ONLY for required fields that couldn't be resolved
         unanswered = needs_user + [e for e in still_unknown
-                                   if e.id not in answers]
+                                   if e.id not in answers and not allow_skip]
         if unanswered and not fields:
             e = unanswered[0]
             label = e.text or e.placeholder or e.name or "this field"
@@ -277,10 +310,12 @@ def _post_process_submit(req: StepRequest, actions: list[Action]) -> None:
     for a in actions:
         if a.type == ActionType.DONE:
             storage.upsert_application(req.session_id, status="submitted", submitted=1)
+            storage.increment_usage()  # count toward freemium quota
         # A real (non-review) submit click also marks submitted.
         if (a.type == ActionType.CLICK and not REVIEW_BEFORE_SUBMIT
                 and a.target_id and _is_submit_target(req, a.target_id)):
             storage.upsert_application(req.session_id, status="submitted", submitted=1)
+            storage.increment_usage()  # count toward freemium quota
 
 
 def _is_submit_target(req: StepRequest, target_id: str) -> bool:

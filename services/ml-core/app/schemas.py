@@ -56,6 +56,8 @@ class StepRequest(BaseModel):
     objective: str = "apply"
     # Security tokens extracted from the page (CSRF, session tokens)
     security_tokens: Optional[dict[str, Any]] = None
+    # Optional base64 screenshot of the page for Vision LLM fallback
+    screenshot: Optional[str] = None
 
 
 class Action(BaseModel):

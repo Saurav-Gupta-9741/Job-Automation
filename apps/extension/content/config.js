@@ -13,7 +13,7 @@ window.COS.CONFIG = {
   // Poll interval when idle / waiting.
   IDLE_MS: 1500,
   // Automatically move to the next job in the search list after finishing one
-  BULK_APPLY_ENABLED: true,
+  BULK_APPLY_ENABLED: false,
   // Dry run mode: log actions without executing (for testing)
   DRY_RUN_MODE: false,
 };

@@ -109,8 +109,6 @@
 
   async function _executeAction(action, el, attempt) {
     switch (action.type) {
-  async function _executeAction(action, el, attempt) {
-    switch (action.type) {
       case "click": {
         if (!el || !ensureElementReady(el)) {
           return { ok: false, retry: true, reason: "target not ready" };

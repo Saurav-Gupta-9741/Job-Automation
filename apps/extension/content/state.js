@@ -26,6 +26,25 @@
         this.session.running = true;
         await this.save();
       }
+
+      // Cleanup stale sessions (>24h old) to prevent storage bloat
+      if (sessionData && typeof sessionData === "object") {
+        const now = Date.now();
+        const staleThreshold = 24 * 60 * 60 * 1000; // 24 hours
+        let cleaned = false;
+        for (const [sid, data] of Object.entries(sessionData)) {
+          if (sid === id) continue; // Don't clean the active one
+          const ts = parseInt(sid.replace("sess-", "").split("-")[0], 36);
+          if (now - ts > staleThreshold) {
+            delete sessionData[sid];
+            cleaned = true;
+          }
+        }
+        if (cleaned) {
+          await chrome.storage.local.set({ sessionData });
+        }
+      }
+
       return this.session;
     },
 

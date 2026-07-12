@@ -58,25 +58,6 @@ def put_profile(data: dict) -> dict:
     return {"ok": True}
 
 
-@router.post("/api/agent/vision-fallback")
-def vision_fallback(payload: dict) -> dict:
-    """Phase 7: Universal Vision Perception (Fallback).
-    Accepts a base64 screenshot and returns synthetic coordinates for interaction.
-    """
-    image_data = payload.get("image")
-    if not image_data:
-        raise HTTPException(400, "No image provided")
-        
-    # In a real implementation, we would call GPT-4o or Claude 3.5 Sonnet here:
-    # coordinates = vision_model.predict(image_data)
-    
-    # For now, return a mock response that the extension can interpret.
-    return {
-        "ok": True,
-        "action": "click",
-        "coordinates": {"x": 500, "y": 300},
-        "reason": "Vision model identified the 'Apply' button."
-    }
 
 @router.get("/api/applications")
 def list_applications() -> list[dict]:
@@ -125,6 +106,45 @@ def export_applications_csv() -> str:
         media_type='text/csv',
         headers={'Content-Disposition': 'attachment; filename=career_os_applications.csv'}
     )
+
+
+@router.get("/api/usage")
+def get_usage() -> dict:
+    """Get current month's usage and quota."""
+    return storage.get_usage()
+
+
+@router.post("/api/license")
+def activate_license(payload: dict) -> dict:
+    """Activate a license key to upgrade to Pro tier."""
+    key = payload.get("key", "").strip()
+    if not key or len(key) < 8:
+        raise HTTPException(400, "Invalid license key")
+    if not key.startswith("COS-"):
+        raise HTTPException(400, "Invalid key format. Keys start with COS-")
+    result = storage.activate_license(key, tier="pro", limit=50)
+    return {"ok": True, "usage": result}
+
+
+@router.get("/api/config")
+def get_config() -> dict:
+    """Get current LLM provider config (key masked)."""
+    from .llm.client import get_user_config, has_api_key
+    cfg = get_user_config()
+    cfg["has_key"] = has_api_key()
+    return cfg
+
+
+@router.put("/api/config")
+def put_config(payload: dict) -> dict:
+    """Update LLM provider config (BYOK)."""
+    from .llm.client import set_user_config
+    set_user_config(
+        provider=payload.get("provider", "groq"),
+        api_key=payload.get("api_key", ""),
+        model=payload.get("model", ""),
+    )
+    return {"ok": True}
 
 
 @router.get("/api/stats")
