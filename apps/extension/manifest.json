@@ -3,11 +3,27 @@
   "name": "Career OS",
   "version": "1.0.0",
   "description": "AI-powered LinkedIn Easy Apply agent. Auto-fills applications using your resume.",
-  "permissions": ["activeTab", "storage", "scripting", "tabs"],
+  "permissions": ["activeTab", "storage", "scripting", "tabs", "webNavigation"],
   "host_permissions": [
     "http://127.0.0.1:8000/*",
     "http://localhost:8000/*",
-    "https://*.linkedin.com/*"
+    "https://*.linkedin.com/*",
+    "https://*.myworkdayjobs.com/*",
+    "https://*.myworkdaysite.com/*",
+    "https://*.greenhouse.io/*",
+    "https://*.lever.co/*",
+    "https://*.smartrecruiters.com/*",
+    "https://*.icims.com/*",
+    "https://*.taleo.net/*",
+    "https://*.brassring.com/*",
+    "https://*.jobvite.com/*",
+    "https://*.ashbyhq.com/*",
+    "https://*.bamboohr.com/*",
+    "https://*.recruiterbox.com/*",
+    "https://*.jazz.co/*",
+    "https://*.workable.com/*",
+    "https://*.applytojob.com/*",
+    "https://*.ultipro.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -17,7 +33,25 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*.linkedin.com/*"],
+      "matches": [
+        "https://*.linkedin.com/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://*.myworkdaysite.com/*",
+        "https://*.greenhouse.io/*",
+        "https://*.lever.co/*",
+        "https://*.smartrecruiters.com/*",
+        "https://*.icims.com/*",
+        "https://*.taleo.net/*",
+        "https://*.brassring.com/*",
+        "https://*.jobvite.com/*",
+        "https://*.ashbyhq.com/*",
+        "https://*.bamboohr.com/*",
+        "https://*.recruiterbox.com/*",
+        "https://*.jazz.co/*",
+        "https://*.workable.com/*",
+        "https://*.applytojob.com/*",
+        "https://*.ultipro.com/*"
+      ],
       "js": [
         "content/config.js",
         "content/state.js",
@@ -29,13 +63,13 @@
       ],
       "css": ["styles/widget.css"],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [
     {
       "resources": ["styles/widget.css"],
-      "matches": ["https://*.linkedin.com/*"]
+      "matches": ["<all_urls>"]
     }
   ]
 }

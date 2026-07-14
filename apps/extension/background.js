@@ -100,6 +100,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       } else if (msg.kind === "GET_CONFIG") {
         const r = await fetch(BACKEND + "/api/config");
         sendResponse({ ok: true, data: await r.json() });
+      } else if (msg.kind === 'GET_TAB_ID') {
+        sendResponse({ ok: true, tabId: sender.tab?.id });
       } else {
         sendResponse({ ok: false, error: "unknown message" });
       }
@@ -119,6 +121,17 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     const { activeSession } = await chrome.storage.local.get("activeSession");
     if (activeSession && tab.id != null) {
       await chrome.storage.local.set({ [`inherit:${tab.id}`]: activeSession });
+    }
+  } catch (_) {}
+});
+
+// Track same-tab navigations (HTTP redirects) to preserve session
+chrome.webNavigation?.onBeforeNavigate?.addListener(async (details) => {
+  if (details.frameId !== 0) return; // Only main frame
+  try {
+    const { activeSession } = await chrome.storage.local.get('activeSession');
+    if (activeSession && details.tabId != null) {
+      await chrome.storage.local.set({ [`inherit:${details.tabId}`]: activeSession });
     }
   } catch (_) {}
 });

@@ -55,15 +55,23 @@ class TokenBudgeter:
 
 
 class CircuitBreaker:
-    def __init__(self, threshold: int = LLM_FAILURE_THRESHOLD):
+    def __init__(self, threshold: int = LLM_FAILURE_THRESHOLD, recovery_timeout: int = 60):
         self.threshold = threshold
+        self.recovery_timeout = recovery_timeout
         self._failures = 0
+        self._last_failure_time = 0
         self._lock = threading.Lock()
 
     @property
     def is_open(self) -> bool:
         with self._lock:
-            return self._failures >= self.threshold
+            if self._failures >= self.threshold:
+                # Check if recovery timeout has passed
+                if time.time() - self._last_failure_time > self.recovery_timeout:
+                    # Half-open state: allow one request through
+                    return False
+                return True
+            return False
 
     def record_success(self) -> None:
         with self._lock:
@@ -72,6 +80,7 @@ class CircuitBreaker:
     def record_failure(self) -> None:
         with self._lock:
             self._failures += 1
+            self._last_failure_time = time.time()
 
 
 # Shared singletons.

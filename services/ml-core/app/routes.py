@@ -55,6 +55,7 @@ def get_profile() -> dict:
 @router.put("/api/profile")
 def put_profile(data: dict) -> dict:
     save_profile(data)
+    storage.clear_field_memory()
     return {"ok": True}
 
 

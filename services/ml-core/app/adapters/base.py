@@ -62,8 +62,10 @@ def empty(e: Element) -> bool:
 
 
 # Common submit/advance vocab.
-NEXT_WORDS = ["next", "continue", "review", "save and continue"]
-SUBMIT_WORDS = ["submit application", "submit", "apply now", "send application"]
+NEXT_WORDS = ["next", "continue", "review", "save and continue",
+              "weiter", "suivant", "siguiente", "avanti", "próximo", "volgende", "次へ"]
+SUBMIT_WORDS = ["submit application", "submit", "apply now", "send application",
+                "absenden", "envoyer", "enviar", "inviare", "送信"]
 
 
 def fill_known_fields(elements: list[Element], profile: Profile) -> list[Action]:

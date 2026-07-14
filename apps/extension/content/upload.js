@@ -22,9 +22,21 @@
   function setNativeInput(input, file) {
     const dt = new DataTransfer();
     dt.items.add(file);
+    // Use Object.defineProperty for React compatibility
+    Object.defineProperty(input, 'files', { value: dt.files, writable: true });
     input.files = dt.files;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
+    // Dispatch framework-aware events
+    const inputEvent = new Event('input', { bubbles: true, cancelable: true, composed: true });
+    Object.defineProperty(inputEvent, 'target', { value: input });
+    input.dispatchEvent(inputEvent);
+    const changeEvent = new Event('change', { bubbles: true, cancelable: true, composed: true });
+    Object.defineProperty(changeEvent, 'target', { value: input });
+    input.dispatchEvent(changeEvent);
+    // React-specific: trigger native input event setter
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    if (nativeInputValueSetter) {
+      nativeInputValueSetter.call(input, input.value);
+    }
     return true;
   }
 

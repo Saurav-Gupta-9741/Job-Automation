@@ -112,6 +112,11 @@
     try {
       await doOneStep();
     } catch (err) {
+      if (String(err).includes('Extension context invalidated')) {
+        document.body.insertAdjacentHTML('beforeend', 
+          '<div style="position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:2147483647;background:#ef4444;color:white;padding:16px 24px;border-radius:12px;font-family:sans-serif;font-size:14px;box-shadow:0 4px 24px rgba(0,0,0,0.3)">Career OS: Extension updated. Please refresh this page (F5) to continue.</div>');
+        return;
+      }
       log("Unexpected error in tick: " + err);
       Widget.status("Error: " + String(err).slice(0, 40));
     } finally {
@@ -122,6 +127,24 @@
   async function doOneStep() {
     // --- 1. PERCEIVE: scan the visible page ---
     const all = Scanner.scan();
+    
+    // Check for CAPTCHA challenges
+    const captchaFrame = document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare"], iframe[title*="reCAPTCHA"]');
+    if (captchaFrame) {
+      log('CAPTCHA detected — pausing for human');
+      paused = true;
+      Widget.requestHandoff({ type: 'ask_user', prompt: 'A CAPTCHA challenge was detected. Please solve it, then click Resume.', input_kind: 'manual' });
+      return;
+    }
+    
+    // Check if job posting is closed
+    if (Scanner.isJobClosed()) {
+      log('Job closed detected — stopping');
+      Widget.status('This job is no longer accepting applications.');
+      await stop();
+      return;
+    }
+    
     const prev = State.session.prevElements || [];
     const elements = Scanner.diff(all, prev);
     const stageHash = Scanner.stageHash(all);
@@ -159,8 +182,9 @@
       Widget.status(`Backend error (${consecutiveErrors}/${MAX_ERRORS})`, String(e).slice(0, 50));
 
       if (consecutiveErrors >= MAX_ERRORS) {
-        Widget.status("Too many errors — stopping");
-        await stop();
+        Widget.status('Multiple errors — paused. Fill this step manually, then click Resume.');
+        paused = true;
+        Widget.requestHandoff({ type: 'ask_user', prompt: 'Too many backend errors. Please fill this step manually and click Resume.', input_kind: 'manual' });
         return;
       }
       const delay = Math.min(2000 * Math.pow(2, consecutiveErrors), 30000);
@@ -206,6 +230,13 @@
       const delay = COS.rand(CFG.MIN_ACTION_DELAY_MS, CFG.MAX_ACTION_DELAY_MS);
       log(`  → Waiting ${delay}ms before next action`);
       await COS.sleep(delay);
+    }
+
+    // Check if we just clicked a submit/next button — add cooldown
+    const clickedSubmit = resp.script.some(a => a.type === 'click' && (a.submit || a.next));
+    if (clickedSubmit) {
+      log('Post-submit cooldown: waiting for page change...');
+      await COS.sleep(2000); // Wait for navigation
     }
 
     // Schedule the next tick (next perceive-think-act cycle)

@@ -8,17 +8,27 @@
     session: null, // { id, objective, running, lastStageHash, prevElements }
 
     async load() {
+      // Get tab ID for tab-scoped session storage
+      let tabId = null;
+      try {
+        const resp = await chrome.runtime.sendMessage({ kind: 'GET_TAB_ID' });
+        tabId = resp?.tabId;
+      } catch(_) {}
+      const tabKey = tabId ? `session:${tabId}` : 'activeSession';
+      this._tabKey = tabKey; // Store for save/stop
+      
       // Inherit a session id if the background worker parked one for this tab.
       const tabKeyResp = await chrome.storage.local.get(null);
       let inherited = null;
       for (const k of Object.keys(tabKeyResp)) {
-        if (k.startsWith("inherit:")) {
+        if (k.startsWith("inherit:") && (!tabId || k === `inherit:${tabId}`)) {
           inherited = tabKeyResp[k];
           await chrome.storage.local.remove(k);
           break;
         }
       }
-      const { activeSession, sessionData } = tabKeyResp;
+      const activeSession = tabKeyResp[tabKey] || tabKeyResp['activeSession'];
+      const sessionData = tabKeyResp.sessionData;
       const id = inherited || activeSession || null;
       this.session = (id && sessionData && sessionData[id]) || null;
       if (this.session && inherited) {
@@ -64,13 +74,15 @@
 
     async save() {
       if (!this.session) return;
+      const tabKey = this._tabKey || 'activeSession';
       const { sessionData } = await chrome.storage.local.get("sessionData");
       const data = sessionData || {};
       data[this.session.id] = this.session;
-      await chrome.storage.local.set({
-        sessionData: data,
-        activeSession: this.session.id,
-      });
+      const storageUpdate = { sessionData: data };
+      storageUpdate[tabKey] = this.session.id;
+      // Also write to activeSession for backward compatibility
+      storageUpdate.activeSession = this.session.id;
+      await chrome.storage.local.set(storageUpdate);
     },
 
     async stop() {
@@ -78,7 +90,10 @@
         this.session.running = false;
         await this.save();
       }
-      await chrome.storage.local.remove("activeSession");
+      const tabKey = this._tabKey || 'activeSession';
+      const keysToRemove = ['activeSession'];
+      if (tabKey !== 'activeSession') keysToRemove.push(tabKey);
+      await chrome.storage.local.remove(keysToRemove);
     },
 
     isRunning() {

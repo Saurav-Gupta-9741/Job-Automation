@@ -54,6 +54,9 @@ PROVIDERS = {
     },
 }
 
+# Fallback order when primary provider fails
+FALLBACK_PROVIDERS = ["groq", "openai", "together", "openrouter", "anthropic", "google"]
+
 # ── User config (set via PUT /api/config) ──
 _user_config: dict[str, str] = {
     "provider": "groq",
@@ -136,7 +139,23 @@ def _extract_json(content: str) -> dict[str, Any]:
     start, end = content.find("{"), content.rfind("}")
     if start == -1 or end == -1:
         raise ValueError("no JSON object in LLM response")
-    return json.loads(content[start : end + 1])
+    raw = content[start : end + 1]
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Attempt to repair truncated JSON (e.g. cut off mid-answer array)
+        logger.warning("JSON parse failed, attempting truncated JSON repair")
+        # Strip trailing incomplete entry after the last complete '}' in the answers array
+        last_complete = raw.rfind("}")
+        if last_complete > 0:
+            candidate = raw[:last_complete + 1]
+            # Try closing the array and outer object
+            for suffix in ("]}", "}"):
+                try:
+                    return json.loads(candidate + suffix)
+                except json.JSONDecodeError:
+                    continue
+        raise ValueError("could not repair truncated JSON from LLM response")
 
 
 # ── Provider-specific API calls ────────────────────────────────────────────────
@@ -152,7 +171,7 @@ def _call_openai_format(base_url: str, api_key: str, model: str,
         ],
         "temperature": 0,
         "response_format": {"type": "json_object"},
-        "max_tokens": 600,
+        "max_tokens": 2500,
     }
     headers = {"Authorization": f"Bearer {api_key}"}
     with httpx.Client(timeout=30) as client:
@@ -164,7 +183,7 @@ def _call_anthropic(api_key: str, model: str, system: str, user_content: str) ->
     """Anthropic Messages API."""
     payload = {
         "model": model,
-        "max_tokens": 600,
+        "max_tokens": 2500,
         "system": system,
         "messages": [{"role": "user", "content": user_content}],
     }
@@ -189,7 +208,7 @@ def _call_google(api_key: str, model: str, system: str, user_content: str) -> tu
     """Google Gemini API."""
     payload = {
         "contents": [{"parts": [{"text": f"{system}\n\n{user_content}"}]}],
-        "generationConfig": {"temperature": 0, "maxOutputTokens": 600,
+        "generationConfig": {"temperature": 0, "maxOutputTokens": 2500,
                              "responseMimeType": "application/json"},
     }
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
@@ -205,6 +224,57 @@ def _call_google(api_key: str, model: str, system: str, user_content: str) -> tu
 
 
 # ── Main entry point ───────────────────────────────────────────────────────────
+
+def _try_provider(provider: str, api_key: str, model: str, fmt: str, base_url: str,
+                  user_prompt: str, user_content: Any, needed: int) -> tuple[dict, bool]:
+    """Try a specific provider. Returns (result_dict, success_flag)."""
+    for attempt in range(RetryConfig.MAX_RETRIES + 1):
+        try:
+            if fmt == "anthropic":
+                status_code, data = _call_anthropic(api_key, model, SYSTEM, user_prompt)
+            elif fmt == "google":
+                status_code, data = _call_google(api_key, model, SYSTEM, user_prompt)
+            else:
+                status_code, data = _call_openai_format(base_url, api_key, model, SYSTEM, user_content)
+
+            if status_code == 429:
+                if attempt < RetryConfig.MAX_RETRIES:
+                    delay = RetryConfig.get_delay(attempt)
+                    logger.warning(f"Rate limited (429) from {provider}, retry {attempt + 1}/{RetryConfig.MAX_RETRIES} after {delay:.1f}s")
+                    time.sleep(delay)
+                    continue
+                logger.warning(f"Rate limited (429) from {provider}, exhausted retries")
+                return {}, False
+
+            if status_code >= 400:
+                raise httpx.HTTPStatusError(
+                    f"HTTP {status_code}", request=None, response=None  # type: ignore
+                )
+
+            usage = data.get("usage", {})
+            used = usage.get("total_tokens", needed)
+            budgeter.record(used)
+
+            content = data["choices"][0]["message"]["content"]
+            parsed = _extract_json(content)
+
+            out: dict[str, dict] = {}
+            for ans in parsed.get("answers", []):
+                if "id" in ans:
+                    out[str(ans["id"])] = {
+                        "value": ans.get("value"),
+                        "needs_user": bool(ans.get("needs_user", False)),
+                        "confidence": float(ans.get("confidence", 0.5)),
+                    }
+
+            logger.info(f"LLM ({provider}/{model}) resolved {len(out)} fields")
+            return out, True
+
+        except Exception as e:
+            logger.warning(f"Provider {provider} failed: {e}")
+            return {}, False
+    return {}, False
+
 
 def resolve_fields(profile_slice: str, elements: list[Element],
                    screenshot: Optional[str] = None) -> dict[str, dict]:
@@ -244,64 +314,42 @@ def resolve_fields(profile_slice: str, elements: list[Element],
             {"type": "image_url", "image_url": {"url": screenshot}},
         ]
 
-    last_error: Optional[Exception] = None
-    for attempt in range(RetryConfig.MAX_RETRIES):
-        try:
-            # Call the appropriate provider
-            if fmt == "anthropic":
-                status_code, data = _call_anthropic(api_key, model, SYSTEM, user_prompt)
-            elif fmt == "google":
-                status_code, data = _call_google(api_key, model, SYSTEM, user_prompt)
-            else:
-                status_code, data = _call_openai_format(base_url, api_key, model, SYSTEM, user_content)
+    # Try primary provider first
+    primary_provider = _user_config["provider"]
+    result, success = _try_provider(primary_provider, api_key, model, fmt, base_url,
+                                     user_prompt, user_content, needed)
+    if success:
+        breaker.record_success()
+        return result
 
-            if status_code == 429:
-                logger.warning(f"Rate limited (429), attempt {attempt + 1}/{RetryConfig.MAX_RETRIES}")
-                breaker.record_failure()
-                budgeter.record(needed)
-                if attempt < RetryConfig.MAX_RETRIES - 1:
-                    time.sleep(RetryConfig.get_delay(attempt))
-                    continue
-                return {}
+    # Primary failed - try fallback providers
+    logger.warning(f"Primary provider {primary_provider} failed, trying fallbacks...")
+    breaker.record_failure()
 
-            if status_code >= 400:
-                raise httpx.HTTPStatusError(
-                    f"HTTP {status_code}", request=None, response=None  # type: ignore
-                )
-
-            usage = data.get("usage", {})
-            used = usage.get("total_tokens", needed)
-            budgeter.record(used)
-
-            content = data["choices"][0]["message"]["content"]
-            parsed = _extract_json(content)
+    for fallback_provider in FALLBACK_PROVIDERS:
+        if fallback_provider == primary_provider:
+            continue
+        
+        fallback_config = PROVIDERS.get(fallback_provider)
+        if not fallback_config:
+            continue
+            
+        # Need API key for fallback - check if user has configured one
+        # For now, we only try fallbacks if they have the same format and we have a key
+        # In production, you'd want separate API keys per provider
+        if fallback_config["format"] != fmt:
+            continue
+            
+        fallback_base_url = fallback_config["base_url"]
+        fallback_model = fallback_config["default_model"]
+        
+        # Use the same API key (works for OpenAI-compatible APIs)
+        result, success = _try_provider(fallback_provider, api_key, fallback_model, 
+                                         fmt, fallback_base_url, user_prompt, user_content, needed)
+        if success:
             breaker.record_success()
+            logger.info(f"Fallback to {fallback_provider} succeeded")
+            return result
 
-            out: dict[str, dict] = {}
-            for ans in parsed.get("answers", []):
-                if "id" in ans:
-                    out[str(ans["id"])] = {
-                        "value": ans.get("value"),
-                        "needs_user": bool(ans.get("needs_user", False)),
-                        "confidence": float(ans.get("confidence", 0.5)),
-                    }
-
-            logger.info(f"LLM ({_user_config['provider']}/{model}) resolved {len(out)} fields")
-            return out
-
-        except Exception as e:
-            last_error = e
-            is_transient = ErrorClassification.is_transient(e)
-            logger.warning(f"LLM call failed (attempt {attempt + 1}): {e}, transient={is_transient}")
-
-            if not is_transient:
-                breaker.record_failure()
-                return {}
-
-            if attempt < RetryConfig.MAX_RETRIES - 1:
-                time.sleep(RetryConfig.get_delay(attempt))
-            else:
-                logger.error(f"Max retries exceeded: {last_error}")
-                breaker.record_failure()
-
+    logger.error("All providers failed")
     return {}

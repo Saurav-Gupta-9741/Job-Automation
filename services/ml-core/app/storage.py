@@ -24,6 +24,8 @@ MAX_HISTORY_LENGTH = 10
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -106,6 +108,101 @@ def normalize_question(text: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+# --- semantic field matching ---------------------------------------------------
+
+# Common field synonyms for semantic matching
+FIELD_SYNONYMS = {
+    "first_name": ["first name", "given name", "fname", "first", "name first"],
+    "last_name": ["last name", "surname", "family name", "lname", "name last"],
+    "full_name": ["full name", "name", "your name", "complete name"],
+    "email": ["email", "email address", "e-mail", "mail", "contact email"],
+    "phone": ["phone", "phone number", "mobile", "mobile number", "cell", "cell phone", "telephone", "contact number"],
+    "address": ["address", "street address", "home address", "mailing address", "residence"],
+    "city": ["city", "town", "municipality"],
+    "state": ["state", "province", "region", "territory"],
+    "zip": ["zip", "zip code", "postal code", "postcode", "postal"],
+    "country": ["country", "nation"],
+    "linkedin": ["linkedin", "linkedin profile", "linkedin url", "linked in"],
+    "github": ["github", "github profile", "github url", "git hub"],
+    "portfolio": ["portfolio", "portfolio url", "website", "personal website", "web site"],
+    "years_experience": ["years of experience", "experience years", "years exp", "how many years", "experience"],
+    "salary": ["salary", "expected salary", "desired salary", "compensation", "pay", "ctc", "current ctc", "expected ctc"],
+    "work_authorization": ["work authorization", "authorized to work", "work permit", "visa status", "immigration status", "sponsorship"],
+    "requires_sponsorship": ["requires sponsorship", "need sponsorship", "visa sponsorship", "h1b", "h-1b"],
+    "notice_period": ["notice period", "notice", "availability", "when can you start", "start date"],
+    "gender": ["gender", "sex"],
+    "disability": ["disability", "disabled", "accessibility needs"],
+    "veteran": ["veteran", "military service", "armed forces"],
+    "ethnicity": ["ethnicity", "race", "ethnic background"],
+    "cover_letter": ["cover letter", "motivation letter", "letter of motivation"],
+    "resume": ["resume", "cv", "curriculum vitae", "upload resume", "attach resume"],
+    "referral": ["referral", "referred by", "employee referral", "how did you hear"],
+}
+
+
+def _expand_synonyms(text: str) -> set[str]:
+    """Expand a normalized question with its synonyms."""
+    normalized = normalize_question(text)
+    words = set(normalized.split())
+    expanded = set(words)
+    
+    for canonical, synonyms in FIELD_SYNONYMS.items():
+        # Check if any synonym matches
+        for syn in synonyms:
+            syn_words = set(normalize_question(syn).split())
+            if syn_words.issubset(words) or words.issubset(syn_words):
+                # Add all synonyms to expanded set
+                for s in synonyms:
+                    expanded.update(normalize_question(s).split())
+                expanded.add(canonical)
+                break
+    
+    return expanded
+
+
+def find_similar_question(q_raw: str, threshold: float = 0.6) -> Optional[dict[str, Any]]:
+    """
+    Find a similar question in the answer bank using semantic matching.
+    Returns the best match if similarity exceeds threshold.
+    """
+    q_words = _expand_synonyms(q_raw)
+    if not q_words:
+        return None
+    
+    with _lock:
+        rows = _conn.execute("SELECT * FROM field_memory").fetchall()
+        
+    best_match = None
+    best_score = 0.0
+    
+    for row in rows:
+        stored_words = _expand_synonyms(row["q_raw"])
+        if not stored_words:
+            continue
+            
+        # Jaccard similarity
+        intersection = len(q_words & stored_words)
+        union = len(q_words | stored_words)
+        if union == 0:
+            continue
+        score = intersection / union
+        
+        if score > best_score and score >= threshold:
+            best_score = score
+            best_match = dict(row)
+    
+    if best_match:
+        # Update usage count
+        with _lock:
+            _conn.execute(
+                "UPDATE field_memory SET uses = uses + 1 WHERE q_norm = ?", 
+                (best_match["q_norm"],)
+            )
+            _conn.commit()
+    
+    return best_match
+
+
 # --- field memory / answer bank ------------------------------------------------
 
 def remember_answer(q_raw: str, answer: str, source: str, confidence: float = 1.0) -> None:
@@ -142,6 +239,13 @@ def recall_answer(q_raw: str) -> Optional[dict[str, Any]]:
             _conn.commit()
             return dict(row)
     return None
+
+
+def clear_field_memory() -> None:
+    """Delete all rows from the field_memory table (cache invalidation)."""
+    with _lock:
+        _conn.execute("DELETE FROM field_memory")
+        _conn.commit()
 
 
 # --- applications / idempotency ------------------------------------------------

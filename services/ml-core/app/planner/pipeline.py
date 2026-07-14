@@ -30,7 +30,8 @@ _BLOCKER_SIGNS = {
     "rate_limit": ["slow down", "too many applications", "wait a moment",
                    "you're applying too fast", "take a break",
                    "unusual activity", "verify your account",
-                   "you've reached your application limit"],
+                   "you've reached your application limit",
+                   "application limit", "rate limit", "too many requests"],
 }
 
 MAX_STAGE_REPEATS = 3
@@ -196,6 +197,8 @@ def _resolve_fields(req: StepRequest, profile: Profile,
 
     If allow_skip=True (optional fields), we never ask the user — just skip
     what we can't fill and let the form proceed.
+    
+    Enhanced with semantic field matching for better recall.
     """
     fields: list[dict] = []
     still_unknown: list[Element] = []
@@ -203,7 +206,11 @@ def _resolve_fields(req: StepRequest, profile: Profile,
 
     for e in unresolved:
         label = e.text or e.placeholder or e.name or ""
+        # Try exact match first
         hit = storage.recall_answer(label)
+        # If no exact match, try semantic matching
+        if not hit or not hit["answer"]:
+            hit = storage.find_similar_question(label, threshold=0.6)
         if hit and hit["answer"]:
             telemetry.track_memory_hit(req.session_id, label)
             fields.append({"target_id": e.id, "value": hit["answer"],

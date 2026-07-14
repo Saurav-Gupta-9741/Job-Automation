@@ -97,6 +97,8 @@ class Profile:
         for synonyms, key in _FIELD_SYNONYMS:
             if any(s in norm for s in synonyms):
                 val = self.data.get(key)
+                if isinstance(val, str) and key in ('skills',):
+                    val = [s.strip() for s in val.split(',') if s.strip()]
                 if isinstance(val, list):
                     val = ", ".join(val)
                 if val not in (None, ""):
@@ -106,7 +108,7 @@ class Profile:
     def context_slice(self, max_chars: int = 2500) -> str:
         """A compact profile summary for LLM prompts."""
         d = self.data
-        lines = [
+        raw_lines = [
             f"Name: {d.get('full_name')}",
             f"Email: {d.get('email')}  Phone: {d.get('phone')}",
             f"Location: {d.get('location')}  City: {d.get('city')}",
@@ -121,8 +123,20 @@ class Profile:
             f"Relocate: {d.get('willing_to_relocate')}",
             f"Gender: {d.get('gender', '')}  Veteran: {d.get('veteran_status', '')}",
             f"Summary: {d.get('summary', '')[:500]}",
-            f"Resume: {d.get('raw_text', '')[:600]}",
+            f"Resume: {d.get('raw_text', '')[:300]}",
         ]
+        # Skip empty fields (lines where all values after the label are blank)
+        lines = []
+        for line in raw_lines:
+            # Extract everything after the first colon
+            parts = line.split(":", 1)
+            if len(parts) == 2:
+                value_part = parts[1].strip()
+                # Skip if the value portion is empty or contains only separators/whitespace
+                cleaned = value_part.replace("|", "").replace("at", "").strip()
+                if not cleaned or cleaned in ("years", "Negotiable", "Immediately available"):
+                    continue
+            lines.append(line)
         return "\n".join(lines)[:max_chars]
 
 

@@ -150,6 +150,7 @@
       }
       if (!isDragging) return;
       e.preventDefault();
+      e.stopPropagation();
       let x = e.clientX - dragOffsetX;
       let y = e.clientY - dragOffsetY;
       x = Math.max(0, Math.min(window.innerWidth - root.offsetWidth, x));
@@ -160,7 +161,9 @@
       root.style.top = y + "px";
     }
 
-    function onUp() {
+    function onUp(e) {
+      e.stopPropagation();
+      e.preventDefault();
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
       root.classList.remove("dragging");
